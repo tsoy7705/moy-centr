@@ -1,6 +1,6 @@
 // Кэш оболочки приложения для работы без сети (самостоятельный хостинг).
-const CACHE = 'moy-centr-v1';
-const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon.svg'];
+const CACHE = 'moy-centr-v2';
+const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim();

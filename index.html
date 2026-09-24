@@ -5,9 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#2C4A51">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Мой центр">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}</style>
 </head>
 <body>
@@ -147,6 +150,12 @@ button.pill{cursor:pointer}
 .btn-s{border:1px solid var(--line);background:var(--surface2);border-radius:999px;padding:8px 13px;font-size:13px;font-weight:600}
 .btn-s.pri{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
 .btn-s.danger{color:var(--urgent)}
+
+.backup{border-top:1px solid var(--line);padding-top:18px}
+.backup-t{display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted)}
+.backup-t b{color:var(--ink);font-size:14px}
+.backup-t .late{color:var(--urgent)}
+.btn-s[disabled]{opacity:.5;cursor:not-allowed}
 
 /* dock */
 .dock{position:fixed;left:0;right:0;bottom:0;z-index:20;padding:12px 16px calc(14px + env(safe-area-inset-bottom,0px));background:linear-gradient(to top,var(--bg) 60%,color-mix(in srgb,var(--bg) 0%,transparent))}
@@ -682,8 +691,83 @@ function renderHome() {
     <div class="spheres">
       ${SPH_ORDER.map(k => { const n = act.filter(t => t.sphere === k).length; return `<button class="tile s-${k}" data-go="sphere:${k}"><span class="ic">${SPH[k].icon}</span><span class="nm">${SPH[k].name}</span><span class="ct">${n ? n + ' ' + plural(n, ['дело', 'дела', 'дел']) : 'пусто'}</span></button>`; }).join('')}
     </div>
+  </section>
+  ${backupHTML()}`;
+}
+
+/* ---------------- backup ---------------- */
+function backupHTML() {
+  const at = lsGet('mc.backupAt');
+  const n = Store.all().length;
+  const days = at ? Math.floor((Date.now() - at) / DAY) : null;
+  const stale = n && (days === null || days >= 7);
+  const when = at === null ? 'Копий ещё не было' : days === 0 ? 'Последняя копия сегодня' : `Последняя копия ${days} ${plural(days, ['день', 'дня', 'дней'])} назад`;
+  return `<section class="block backup">
+    <div class="backup-t"><b>Копия данных</b><span class="${stale ? 'late' : ''}">${when}${syncOn ? ' · данные уже хранятся в аккаунте' : ''}</span></div>
+    <div class="actions">
+      <button class="btn-s ${stale ? 'pri' : ''}" data-act="backup" ${n ? '' : 'disabled'}>Сохранить копию</button>
+      <button class="btn-s" data-act="restore">Восстановить из копии</button>
+    </div>
+    <input type="file" id="restoreFile" accept=".json,application/json" hidden>
   </section>`;
 }
+async function saveBackup() {
+  const tasks = Store.all().map(({ _synced, ...t }) => t);
+  const name = `moy-centr-${todayISO()}.json`;
+  const json = JSON.stringify({ app: 'moy-centr', version: 1, exportedAt: new Date().toISOString(), tasks }, null, 2);
+  const ok = () => { lsSet('mc.backupAt', Date.now()); render(); toast(`Копия сохранена: ${tasks.length} ${plural(tasks.length, ['дело', 'дела', 'дел'])}`); };
+  if (window.claude && typeof window.claude.use === 'function') {
+    const dl = await window.claude.use('downloads').catch(() => null);
+    if (!dl) { toast('Здесь сохранить файл нельзя'); return; }
+    try { await dl.save({ filename: name, data: json }); ok(); }
+    catch (e) { if (e && e.code !== 'declined') toast('Копия не сохранилась, попробуйте ещё раз'); }
+    return;
+  }
+  const file = new File([json], name, { type: 'application/json' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'Мой центр — копия' }); ok(); }
+    catch (e) { if (e && e.name !== 'AbortError') toast('Копия не сохранилась, попробуйте ещё раз'); }
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a'); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000); ok();
+}
+function readBackup(file) {
+  const fr = new FileReader();
+  fr.onload = () => {
+    let data;
+    try { data = JSON.parse(fr.result); } catch { data = null; }
+    const list = data && Array.isArray(data.tasks) ? data.tasks.filter(t => t && typeof t.id === 'string' && typeof t.title === 'string') : null;
+    if (!list) { toast('Это не файл копии «Мой центр»'); return; }
+    const fresh = list.filter(t => !Store.get(t.id)).length;
+    const newer = list.filter(t => { const c = Store.get(t.id); return c && (t.updatedAt || 0) > (c.updatedAt || 0); }).length;
+    sheets = [];
+    pushSheet(body => {
+      const d = data.exportedAt ? new Date(data.exportedAt) : null;
+      body.innerHTML = `<h2>Восстановить из копии</h2>
+        <p class="lead">${d ? `Копия от ${d.getDate()} ${MON_GEN[d.getMonth()]} ${d.getFullYear()}. ` : ''}В ней ${list.length} ${plural(list.length, ['дело', 'дела', 'дел'])}.</p>
+        <dl class="kv"><dt>Новых</dt><dd>${fresh}</dd><dt>Обновятся</dt><dd>${newer}</dd><dt>Уже есть</dt><dd>${list.length - fresh - newer}</dd></dl>
+        <p class="lead">Текущие дела не удаляются. Добавятся только те, которых нет, и обновятся те, что в копии свежее.</p>
+        <div class="foot"><button class="btn pri" id="rGo" ${fresh + newer ? '' : 'disabled'}>${fresh + newer ? 'Восстановить' : 'Всё уже на месте'}</button><button class="btn ghost" id="rNo">Отмена</button></div>`;
+      $('#rNo', body).onclick = closeSheets;
+      $('#rGo', body).onclick = () => {
+        list.forEach(t => {
+          const c = Store.get(t.id);
+          if (!c || (t.updatedAt || 0) > (c.updatedAt || 0)) Store.put({ ...newTask({ title: t.title }), ...t }, { silent: true });
+        });
+        closeSheets(); render(); toast(`Восстановлено: ${fresh + newer} ${plural(fresh + newer, ['дело', 'дела', 'дел'])}`);
+      };
+    });
+  };
+  fr.readAsText(file);
+}
+document.addEventListener('change', e => {
+  if (e.target.id !== 'restoreFile') return;
+  const f = e.target.files && e.target.files[0]; e.target.value = '';
+  if (f) readBackup(f);
+});
 
 function renderSphere(k) {
   const td = todayISO();
@@ -766,6 +850,8 @@ document.addEventListener('click', e => {
   if (!a || e.target.closest('#sheetRoot')) return;
   const act = a.dataset.act;
   if (act === 'demo') { openVoice(EXAMPLES[0]); return; }
+  if (act === 'backup') { saveBackup(); return; }
+  if (act === 'restore') { $('#restoreFile').click(); return; }
   const host = a.closest('[data-id]'); const t = host && Store.get(host.dataset.id);
   if (!t) return;
   if (act === 'toggle') t.status === 'done' ? reopen(t) : markDone(t);
