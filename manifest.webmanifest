@@ -1,0 +1,12 @@
+{
+  "name": "Мой центр",
+  "short_name": "Мой центр",
+  "description": "Скажи — я разложу. Персональный планировщик с голосовым вводом.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#E3EAE5",
+  "theme_color": "#2C4A51",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
