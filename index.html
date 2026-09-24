@@ -151,6 +151,21 @@ button.pill{cursor:pointer}
 .btn-s.pri{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
 .btn-s.danger{color:var(--urgent)}
 
+.install{display:flex;align-items:center;gap:12px;margin-top:18px;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:12px 14px}
+.install img{border-radius:11px;flex:none}
+.install-t{flex:1;min-width:0;display:flex;flex-direction:column;font-size:12.5px;color:var(--muted)}
+.install-t b{color:var(--ink);font-size:14.5px}
+.install-b{display:flex;flex-direction:column;align-items:center;gap:0}
+.install-b .link{font-size:12.5px;color:var(--muted);font-weight:500}
+.steps{margin:14px 0 0;padding-left:22px;display:flex;flex-direction:column;gap:10px;font-size:15px}
+.steps li::marker{font-family:var(--serif);font-weight:700;color:var(--accent)}
+.ios-share{display:inline-block;width:14px;height:17px;border:2px solid var(--accent);border-top:0;border-radius:0 0 3px 3px;vertical-align:-3px;position:relative;margin:0 2px}
+.ios-share::before{content:"";position:absolute;left:50%;top:-6px;width:2px;height:13px;background:var(--accent);transform:translateX(-50%)}
+.ios-share::after{content:"";position:absolute;left:50%;top:-6px;width:6px;height:6px;border-left:2px solid var(--accent);border-top:2px solid var(--accent);transform:translateX(-50%) rotate(45deg)}
+.qr{width:200px;max-width:100%;margin:6px auto 0;background:#fff;border-radius:14px;padding:8px}
+.qr svg{display:block;width:100%;height:auto}
+.copy-row{display:flex;gap:8px}
+.copy-row .inp{font-size:14px}
 .backup{border-top:1px solid var(--line);padding-top:18px}
 .backup-t{display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted)}
 .backup-t b{color:var(--ink);font-size:14px}
@@ -676,6 +691,7 @@ function renderHome() {
     <div class="pill"><b>${important.length}</b>${plural(important.length, ['важное', 'важных', 'важных'])}</div>
     <button class="pill ${stuck.length ? 'warn' : ''}" data-go="stuck"><b>${stuck.length}</b>висит</button>
   </div>
+  ${installHTML()}
   ${isEmpty ? `<div class="onboard">
       <h3>Выгрузите голову</h3>
       <p>Нажмите «Сказать» и перечислите всё подряд, как есть. Я разделю на дела, найду даты и разложу по сферам.</p>
@@ -693,6 +709,81 @@ function renderHome() {
     </div>
   </section>
   ${backupHTML()}`;
+}
+
+/* ---------------- install ---------------- */
+const inArtifact = !!(window.claude && typeof window.claude.use === 'function');
+const isStandalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const UA = navigator.userAgent;
+const isIOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
+const isIOSSafari = isIOS && !/CriOS|FxiOS|EdgiOS|OPiOS|YaBrowser|GSA/.test(UA);
+const isMobile = isIOS || /Android/.test(UA);
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; render(); });
+window.addEventListener('appinstalled', () => { installEvt = null; toast('Приложение установлено'); render(); });
+function installHTML() {
+  if (inArtifact || isStandalone()) return '';
+  const later = lsGet('mc.installLater');
+  if (later && Date.now() - later < 7 * DAY) return '';
+  const sub = isIOS ? 'Иконка на экране «Домой», открывается как приложение' : isMobile ? 'Иконка на главном экране, работает без интернета' : 'Откройте на телефоне и поставьте иконку';
+  return `<div class="install">
+    <img src="icons/icon-192.png" alt="" width="44" height="44" onerror="this.hidden=true">
+    <div class="install-t"><b>Установить на телефон</b><span>${sub}</span></div>
+    <div class="install-b"><button class="btn-s pri" data-act="install">${installEvt ? 'Установить' : 'Как?'}</button><button class="link" data-act="install-later">Позже</button></div>
+  </div>`;
+}
+async function doInstall() {
+  if (installEvt) {
+    installEvt.prompt();
+    const r = await installEvt.userChoice.catch(() => null);
+    installEvt = null; render();
+    if (r && r.outcome === 'accepted') return;
+  }
+  sheets = [];
+  pushSheet(body => {
+    const url = location.href.split('#')[0];
+    const steps = isIOSSafari ? [
+      'Нажмите <b>«Поделиться»</b> <span class="ios-share" aria-hidden="true"></span> — квадрат со стрелкой внизу экрана (на iPad — вверху).',
+      'Прокрутите меню и выберите <b>«На экран «Домой»»</b>.',
+      'Нажмите <b>«Добавить»</b>. На экране появится иконка «Мой центр».'
+    ] : isIOS ? [
+      'На iPhone установить приложение можно только из <b>Safari</b>.',
+      'Скопируйте ссылку ниже и откройте её в Safari.',
+      'Там нажмите «Поделиться» → «На экран «Домой»» → «Добавить».'
+    ] : isMobile ? [
+      'Откройте меню браузера <b>⋮</b> в правом верхнем углу.',
+      'Выберите <b>«Установить приложение»</b> или <b>«Добавить на главный экран»</b>.',
+      'Подтвердите. Иконка «Мой центр» появится на главном экране.'
+    ] : [
+      'Наведите камеру телефона на QR-код и откройте ссылку.',
+      'На iPhone — в Safari: «Поделиться» → «На экран «Домой»» → «Добавить».',
+      'На Android — в Chrome: меню ⋮ → «Установить приложение».'
+    ];
+    body.innerHTML = `<h2>Установить на телефон</h2>
+      <p class="lead">Приложение откроется во весь экран, без адресной строки, и будет работать без интернета.</p>
+      ${!isMobile ? '<div class="qr" id="qrBox" aria-label="QR-код ссылки на приложение"></div>' : ''}
+      <ol class="steps">${steps.map(s => `<li>${s}</li>`).join('')}</ol>
+      ${isIOSSafari ? '' : `<div class="field"><label for="instUrl">Ссылка</label><div class="copy-row"><input class="inp" id="instUrl" readonly value="${esc(url)}"><button class="btn-s" id="instCopy">Копировать</button></div></div>`}
+      <p class="lead" style="margin-top:14px">Дела в установленном приложении хранятся на телефоне. Чтобы не потерять их, время от времени нажимайте «Сохранить копию» внизу главного экрана.</p>
+      <div class="foot"><button class="btn pri" id="instOk">Понятно</button></div>`;
+    $('#instOk', body).onclick = closeSheets;
+    const cp = $('#instCopy', body);
+    if (cp) cp.onclick = () => {
+      const inp = $('#instUrl', body);
+      navigator.clipboard.writeText(url).then(() => toast('Ссылка скопирована')).catch(() => { inp.focus(); inp.select(); });
+    };
+    const box = $('#qrBox', body);
+    if (box) drawQR(box, url);
+  });
+}
+function drawQR(box, url) {
+  const paint = () => { const q = window.qrcode(0, 'M'); q.addData(url); q.make(); box.innerHTML = q.createSvgTag({ cellSize: 5, margin: 2, scalable: true }); };
+  if (window.qrcode) { paint(); return; }
+  const s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+  s.onload = () => { try { paint(); } catch { box.hidden = true; } };
+  s.onerror = () => { box.hidden = true; };
+  document.head.appendChild(s);
 }
 
 /* ---------------- backup ---------------- */
@@ -851,6 +942,8 @@ document.addEventListener('click', e => {
   const act = a.dataset.act;
   if (act === 'demo') { openVoice(EXAMPLES[0]); return; }
   if (act === 'backup') { saveBackup(); return; }
+  if (act === 'install') { doInstall(); return; }
+  if (act === 'install-later') { lsSet('mc.installLater', Date.now()); render(); return; }
   if (act === 'restore') { $('#restoreFile').click(); return; }
   const host = a.closest('[data-id]'); const t = host && Store.get(host.dataset.id);
   if (!t) return;
